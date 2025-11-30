@@ -1,0 +1,509 @@
+---
+title: "Analiza ogłoszeń aut marki Opel"
+author: "Łukasz Bęc"
+date: "2025-11-18"
+output: 
+  html_document:
+    toc: true #Spis treści
+    toc_float: true #Spis się rusza
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{css message=FALSE, warning=FALSE}
+h1{
+  background-color: #0C2B4E;
+  color: white;
+}
+h2{
+  background-color: #1A3D64;
+  color: white;
+}
+h3{
+  background-color: #1D546C;
+  color: white;
+}
+```
+
+<img src="opel.png" alt="Logo Opel">
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#Wczytywanie potrzebnych bibliotek
+
+library(dplyr)
+library(sf)
+library(ggplot2)
+library(forcats)
+library(highcharter)
+library(gridExtra)
+library(geomtextpath)
+library(scatterpie)
+library(tidyr)
+library(plotly)
+
+```
+
+# Czyszczenie
+
+Aby przystąpić do analizy danych musimy na początek je przygotować, aby to zrobić zaczynamy proces czyszczenia. Zaczynamy od przekonwertowania kolumn na odpowiednie typy zmiennych np. zmienne które zawierają cyfry powinny być numeric itd.
+
+Kolejnym ważnym krokiem jest usunięcie wartości NA jeśli się one znajdują w naszym zbiorze danych, w naszym przypadku danych takich nie było. Warto również sprawdzić czy przypadkiem nie ma gdzieś jakieś literówki lub czy dane nie są pisane z różnymi literami bo Tak ≠ tak. Przy okazji widzimy czy nie ma jakiś danych które nie powinny się znaleźć np w naszym przypadku dane spoza granic Polski. Dzięki temu usuwamy 3 ogłoszenia które zawierały lokalizacje z poza terenu kraju.
+
+Warto również sprawdzić wiarygodność danych bo np auta z lat 2016-2018 z przebiegiem ponad 1 mln km przebiegu wyglądają dosyć podejrzanie i niewiarygodnie dlatego usuniemy 2 takie auta z naszego zbioru. Auta z tak wywyższającym się przebiegiem mogły by zniekształcić wyniki naszej analizy i albo zawyżyć lub zaniżyć niektóre wartości. Teraz możemy już przejść do analizy.
+
+
+```{r warning=FALSE, include=FALSE}
+#Wczytanie dannych do obróbki z dnia 17.11.2025 rok
+DataFrame_OtoMoto <- read.csv("DataFrame_OtoMoto.csv")
+
+#Zmieniamy typy kolumn i czyścimy z niepotrzebnych whitespace i liter
+DataFrame_OtoMoto <- DataFrame_OtoMoto %>%
+  mutate(
+    Year = as.numeric(Year),
+    Price = as.numeric(gsub(" ", "", Price)),
+    Mileage = as.numeric(gsub("km", "", gsub(" ", "", Mileage)))
+  )
+
+#Sprawdzamy typy danych po przekształceniach
+str(DataFrame_OtoMoto)
+
+#Sprawdzamy czy istnieją kolmny NA
+colSums(is.na(DataFrame_OtoMoto))
+
+#Sprawdzamy pogrupowane dane, czy nie ma żadnych literówk, wymyślonych danych lub nie pożądanych danych
+unique(DataFrame_OtoMoto$Fuel)
+unique(DataFrame_OtoMoto$Gearbox)
+unique(DataFrame_OtoMoto$Voivodeship)
+
+#Sprawdzamy czy dane są wiarygodne (czy nie ma jakiś nie prawdopodonych wartości)
+summary(DataFrame_OtoMoto$Year)
+summary(DataFrame_OtoMoto$Price)
+summary(DataFrame_OtoMoto$Mileage)
+
+#Zmieniamy mala litere drugiego członu wojewódz, dla estetyki i poprawności językowej
+DataFrame_OtoMoto$Voivodeship <- tools::toTitleCase(tolower(DataFrame_OtoMoto$Voivodeship))
+
+#Okazało się że mamy dane z wojewódz z poza terytorium Polski, interesują nas tylko ogłoszenia z Polski więc usuwamy obserwacje z poza granic Polski
+DataFrame_OtoMoto <- DataFrame_OtoMoto[
+  !DataFrame_OtoMoto$Voivodeship %in% c("Region Balsthal", "Berlin", "North Rhine-Westphalia"),
+]
+
+
+unique(DataFrame_OtoMoto$Voivodeship)
+
+#Usuwamy obserwacje które maja przebieg ponad milion bo są to przebiegi nie realne dla aut osobowych
+DataFrame_OtoMoto <- DataFrame_OtoMoto[DataFrame_OtoMoto$Mileage < 1000000, ]
+
+summary(DataFrame_OtoMoto$Mileage)
+
+
+```
+
+
+# Średnia cena Opli w Polsce
+
+Przy przeglądaniu ogłoszeń jedną z najważniejszych cech która wpływa na wybór auta jest cena. Dlatego warto sprawdzić, jak kształtują się ceny w poszczególnych województwach, aby wiedzieć, w których regionach najbardziej opłaca się poszukiwać Opla.
+
+## Porównanie cen w województwach
+
+Analiza średnich cen pojazdów marki Opel ujawnia wyraźne zróżnicowanie regionalne rynku. Poszczególne województwa różnią się od siebie pod względem poziomu cen, co wskazuje na istnienie lokalnych uwarunkowań wpływających na wartość ofert. Mogą one wynikać m.in. z różnic w popycie, liczby dostępnych pojazdów czy zamożności mieszkańców.
+
+
+```{r echo=FALSE, warning=FALSE}
+
+# Pobranie granic Polski – level = 1 daje wojewodztwa
+poland_map <- st_as_sf(geodata::gadm(country = "POL", level = 1, path = tempdir()))
+
+#Liczymy średnia cene aut w wojewodztwach
+avg_price_Voivodeship <- DataFrame_OtoMoto %>%
+  group_by(Voivodeship) %>%
+  summarise(avg_price = mean(Price))
+
+#laczymy tabele srednia cena z tabela mapa_polski po wojewodztwach
+poland_map_price <- poland_map %>%
+  left_join(avg_price_Voivodeship, by = c("NAME_1" = "Voivodeship"))
+
+#wyznaczamy centra dla cen
+center_price <- st_centroid(poland_map_price)
+#tworzyby label
+points_price <- center_price %>% 
+  mutate(label = paste0(NAME_1, "\n", round(avg_price), " zł"))
+
+#Wykres mapy
+ggplot(poland_map_price) +
+  geom_sf(aes(fill = avg_price), color = "black") +
+  scale_fill_gradient(low="#B5C7EB", high = "#0C2B4E")+
+  geom_sf_text(data = points_price, aes(label = label), size = 3, color = "white") +
+  ggtitle("Mapa Polski – średnie ceny w województwach") +
+  labs(fill = "Średnia cena")+
+  theme_minimal()+
+  theme(
+    axis.title = element_blank(), # Usuwa tytuły osi (x, y)
+    axis.text = element_blank(),  # Usuwa wartości liczbowe (szerokość/długość)
+    axis.ticks = element_blank(), # Usuwa "kreseczki" na osiach
+    panel.grid = element_blank()  # Usuwa siatkę w tle (opcjonalnie)
+  )
+
+```
+
+Z mapy można zauważyć, że najwyższe ceny występują przede wszystkim w zachodniej oraz południowo-wschodniej części Polski. Zbliżone, choć nieco niższe wartości pojawiają się również w północno-zachodniej części kraju. Natomiast najniższe ceny obserwujemy w województwach położonych w centrum, na wschodzie oraz w południowo-zachodnim obszarze Polski.
+
+Tworzy to ciekawy obraz przestrzennego rozkładu cen: przez środkową część kraju, mniej więcej od południowej granicy z Niemcami aż do granicy z Ukrainą, przebiega wyraźny “pas” województw charakteryzujących się relatywnie niskimi cenami. Taka struktura pozwala szybko wskazać regiony, w których zakup pojazdu może być najbardziej opłacalny oraz zwraca uwagę na znaczące różnice regionalne w obrębie krajowego rynku wtórnego.
+
+
+```{r echo=FALSE, warning=FALSE}
+avg_price_Voivodeship <- avg_price_Voivodeship %>%
+  arrange(avg_price) %>%
+  mutate(
+    rank = row_number(),
+    cat = case_when(
+      rank <= 3 ~ "Bottom 3",
+      rank > n() - 3 ~ "Top 3",
+      TRUE ~ "Reszta"
+    )
+  )
+
+# kolory
+colors <- c("Top 3" = "#D7A63E", "Bottom 3" = "red", "Reszta" = "#1a80bb")
+
+avg_price_interactive <- ggplot(avg_price_Voivodeship) +
+  geom_col(
+    aes(x = avg_price, y = fct_reorder(Voivodeship, avg_price, .desc = FALSE), fill = cat, 
+        text = paste0(Voivodeship, "\n", "Cena: ", scales::number(avg_price, big.mark = " ", accuracy = 0.01), " zł")),
+        width = 0.5) +
+  scale_fill_manual(values = colors) +
+  labs(x = "Średnia cena", y = NULL, fill = NULL)+
+  theme_minimal()
+
+
+ggplotly(avg_price_interactive, tooltip = "text")%>%
+  config(displayModeBar = FALSE) 
+
+```
+
+Dzięki wykresom możemy zauważyć, jak duża różnica dzieli województwa o najwyższych cenach od województw z cenami najniższymi. Różnica ta wynosi około 10 tysięcy złotych, co jest zaskakująco dużą przepaścią cenową.
+
+Ceny w środkowej części wykresu różnią się niewiele, w granicach od 1 do 2 tysięcy złotych. Szczególną różnicę cenową w tym przedziale można zauważyć między województwami kujawsko-pomorskim a mazowieckim, gdzie różnica cenowa jest stosunkowo znacząca.
+
+Podobną sytuację obserwujemy w dolnym przedziale cenowym, między województwem opolskim a dolnośląskim, gdzie również występuje znaczna różnica cenowa. Warto zaznaczyć, że województwo opolskie rozpoczyna tzw. średnią półkę cenową, podczas gdy dolnośląskie kończy niską półkę cenową.
+
+
+### Top 3 i Bottom 3
+
+```{r echo=FALSE, warning=FALSE}
+top3 <- avg_price_Voivodeship %>% top_n(3, avg_price)
+bottom3 <- avg_price_Voivodeship %>% top_n(-3, avg_price)
+
+wyktop3 <- ggplot(top3, aes(x = fct_reorder(Voivodeship, avg_price), y = avg_price)) +
+  geom_col(fill="#D7A63E") +
+  geom_text(aes(label = round(avg_price, 0)), vjust=-0.5) +
+  labs(x=NULL, y="Średnia cena", title="Top 3 województwa") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 35, hjust = 1))
+
+wykbot3 <- ggplot(bottom3, aes(x = fct_reorder(Voivodeship, avg_price), y = avg_price)) +
+  geom_col(fill="red") +
+  geom_text(aes(label = round(avg_price,0)), vjust=-0.5) +
+  labs(x=NULL, y= NULL, title="Bottom 3 województwa") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 35, hjust = 1)
+  )
+  
+grid.arrange(wyktop3, wykbot3, ncol = 2)
+
+```
+
+Jak można zauważyć na wykresie po lewej stronie, przedstawiającym średnie ceny samochodów marki Opel w poszczególnych województwach, najwyższe wartości odnotowano w województwach lubuskim, zachodniopomorskim oraz podkarpackim. Różnice cen między tymi regionami są stosunkowo niewielkie – maksymalnie około 1,5 tysiąca złotych. Mimo to samochody marki Opel wciąż są najdroższe w tych województwach, dlatego poszukiwanie auta w tych regionach może okazać się mało korzystne finansowo.
+
+Zupełnie inaczej wygląda sytuacja w województwach świętokrzyskim, lubelskim oraz łódzkim. To właśnie w tych regionach ceny Opli są najniższe w Polsce, co czyni je atrakcyjnymi miejscami do zakupu. Różnice cen między województwami lubelskim i łódzkim są niewielkie, natomiast województwo świętokrzyskie wyróżnia się najniższymi cenami – średnia cena jest tam aż o około 2 tysiące złotych niższa niż w województwie lubelskim, które zajmuje drugie miejsce w rankingu najtańszych aut.
+
+
+
+
+## Mediana: cena vs województwo
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(DataFrame_OtoMoto, aes(x = Voivodeship, y = Price)) + 
+  geom_boxplot(fill = "#1a80bb", alpha = 0.5, color = "darkblue", outlier.color = "lightblue", outlier.alpha = 0.7) +
+  xlab("Województwo") +
+  ylab("Cena") +
+  ggtitle("Rozrzut cen Opli per województwo") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+Przedstawiony wykres pudełkowy ilustruje rozkład cen samochodów marki Opel w podziale na poszczególne województwa. Wizualizacja ta umożliwia jednoczesną ocenę miar położenia (mediana), zmienności (rozstęp międzykwartylowy) oraz identyfikację wartości skrajnych dla każdego z regionów. Oś odciętych reprezentuje jednostki administracyjne, natomiast oś rzędnych odnosi się do cen ofertowych wyrażonych w PLN.
+
+Analiza poziomu median, oznaczonych poziomymi liniami wewnątrz każdego z „pudełek”, wskazuje na stosunkowo niewielkie zróżnicowanie przeciętnych cen rynkowych w ujęciu terytorialnym. Wartości środkowe kształtują się w zbliżonym przedziale, co sugeruje, że „typowa” cena pojazdu jest porównywalna w skali kraju i zazwyczaj mieści się w granicach 25 000 – 35 000 PLN. Niemniej jednak dostrzegalne są subtelne różnice; przykładowo województwa takie jak podkarpackie czy mazowieckie wykazują nieco wyższą medianę cen w relacji do świętokrzyskiego czy łódzkiego.
+
+Najbardziej charakterystyczną cechą prezentowanych danych jest występowanie licznych wartości odstających (outlierów) we wszystkich analizowanych regionach, co uwidaczniają punkty powyżej górnych „wąsów” wykresu. Potwierdza to silną asymetrię prawostronną rozkładu, zdiagnozowaną we wcześniejszych etapach analizy. Oznacza to, że choć rdzeń rynku skupia się w niższych przedziałach cenowych, w każdym województwie występują egzemplarze o wartościach wielokrotnie przekraczających średnią (sięgające pułapu 150 000 – 200 000 PLN). Zjawisko to jest szczególnie widoczne w regionach z dużymi aglomeracjami, takich jak mazowieckie, śląskie czy wielkopolskie.
+
+Wysokość poszczególnych pudełek, obrazująca rozstęp międzykwartylowy (środkowe 50% obserwacji), wykazuje dużą stabilność między regionami. Świadczy to o tym, że zmienność cen w segmencie ofert standardowych jest zbliżona niezależnie od lokalizacji. Główne różnice w strukturze rynków regionalnych nie wynikają zatem z fundamentalnych dysproporcji w cenach modeli popularnych, lecz przede wszystkim z dostępności ofert z segmentu premium, reprezentowanych przez wartości skrajne.
+
+
+
+# Udział skrzyń biegów w Oplach
+
+Drugim istotnym czynnikiem branym pod uwagę przy wyborze samochodu jest rodzaj zastosowanej skrzyni biegów. Obecnie producenci coraz częściej oferują automatyczne przekładnie, podczas gdy za klasyczne manuale nierzadko trzeba dopłacić. Dotyczy to jednak przede wszystkim nowych pojazdów sprzedawanych bezpośrednio w salonach. Warto więc sprawdzić, jak wygląda sytuacja na rynku wtórnym. Przyjrzymy się zatem jak kształtuje się udział skrzyń biegów na rynku wtórnym.
+
+```{r echo=FALSE, warning=FALSE}
+
+gearbox_ratio_ALL <- DataFrame_OtoMoto%>%
+  group_by(Gearbox)%>%
+  summarise(n = n())%>%
+  mutate(radio = round(n/sum(n) * 100, 2))
+
+
+gearbox_ratio_ALL %>%
+  hchart("pie", hcaes(x = Gearbox, y = radio), name = "Udział procentowy: ")%>%
+  hc_colors(c("orange", "#1a80bb"))%>%
+  hc_title(text = "Rozkład skrzyń biegów")
+
+```
+
+Możemy zauważyć, że zdecydowaną większość rynku nadal stanowią samochody wyposażone w manualną skrzynię biegów — ich udział to aż 80,81% wszystkich przekładni. Oznacza to przewagę na poziomie około 5:1 w porównaniu ze skrzyniami automatycznymi.
+
+Tak wyraźna przewaga skrzyń manualnych wynika przede wszystkim z charakterystyki krajowego rynku wtórnego, na którym wciąż dominują pojazdy starszych roczników. To właśnie one najczęściej wyposażone są w manualne przekładnie, co w naturalny sposób podnosi ich ogólny udział w zestawieniu.
+
+W kolejnej części sprawdzimy, czy ogólny stosunek udziału skrzyń manualnych i automatycznych w kraju znajduje odzwierciedlenie w poszczególnych województwach.
+
+## Skrzynie biegów: podział na wojewódzwa
+
+```{r echo=FALSE, warning=FALSE}
+
+gear_ratio <- DataFrame_OtoMoto %>%
+  group_by(Voivodeship, Gearbox) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(Voivodeship) %>%
+  mutate(ratio = n / sum(n))
+
+
+gear_ratio_wide <- gear_ratio %>%
+  pivot_wider(names_from = Gearbox, values_from = ratio, values_fill = 0)
+
+# Obliczamy centroidy
+center_gearbox <- st_centroid(poland_map)
+
+# Wyciągamy współrzędne X i Y
+coords <- st_coordinates(center_gearbox) %>% 
+  as.data.frame()
+
+coords$Voivodeship <- poland_map$NAME_1  # dopasowujemy nazwy województw
+
+
+gear_ratio_wide <- gear_ratio_wide %>%
+  left_join(coords, by = "Voivodeship") %>%
+  rename(lon = X, lat = Y)
+
+
+ggplot() +
+  geom_sf(data = poland_map, fill = "white", color = "black") +
+  geom_scatterpie(aes(x = lon, y = lat, group = Voivodeship), data = gear_ratio_wide, cols = c("Manualna", "Automatyczna"), pie_scale = 2) +
+  scale_fill_manual(values = c("Manualna" = "#1a80bb", "Automatyczna" = "orange"))+
+    labs(title = "Rozkład typów skrzyni biegów w województwach", fill="Typ skrzyni")+
+  theme_minimal()+
+    theme(
+    axis.title = element_blank(), # Usuwa tytuły osi (x, y)
+    axis.text = element_blank(),  # Usuwa wartości liczbowe (szerokość/długość)
+    axis.ticks = element_blank(), # Usuwa "kreseczki" na osiach
+    panel.grid = element_blank()  # Usuwa siatkę w tle (opcjonalnie)
+  )
+
+```
+
+Dzięki połączeniu mapy z wykresami kołowymi możemy łatwo zauważyć, że w każdym regionie dominuje manualna skrzynia biegów, podczas gdy udział skrzyń automatycznych pozostaje wyraźnie mniejszy. Różnice między województwami są stosunkowo niewielkie, jednak w niektórych z nich, szczególnie w województwach na północy, udział skrzyń automatycznych jest zauważalnie wyższy, co też było widać na mapie z średnimi cenami ponieważ jak możemy zauważyć że automaty mają największy udział tam gdzie były najwyższe średnie ceny czyli w województwach zachodnio-pomorskim oraz lubuskim. Mapa pozwala więc zobaczyć, w jakich częściach kraju obserwujemy stopniowe zwiększanie się popularności przekładni automatycznych.
+
+```{r echo=FALSE, warning=FALSE}
+
+barplot_gearbox <- ggplot(gear_ratio, aes(x = Voivodeship, y = ratio, fill = Gearbox,
+                            text = paste0(Gearbox, ": ", scales::percent(ratio)))) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(x = "Województwo", y = "Procentowy udział", fill = "Typ skrzyni", title = "Udział typów skrzyni biegów w województwach") +
+  scale_fill_manual(values = c("Manualna" = "#1a80bb", "Automatyczna" = "orange"))+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplotly(barplot_gearbox, tooltip = "text")%>%
+  config(displayModeBar = FALSE) 
+
+
+```
+
+Analiza wykresu przedstawiającego udział procentowy skrzyń biegów w województwach Polski wskazuje kilka interesujących zależności. Najniższy udział skrzyń manualnych obserwuje się w województwach lubuskim oraz zachodniopomorskim, gdzie wynosi on około 72%, czyli poniżej średniej krajowej.
+
+Po dokładniejszej obserwacji można stwierdzić, że połowa województw charakteryzuje się udziałem skrzyń manualnych poniżej średniej krajowej, w zakresie od 72% do 78%. Pozostałe województwa wykazują wartości zbliżone do średniej krajowej, oscylujące w granicach ±2–3%.
+
+Wyraźnie wyróżnia się województwo świętokrzyskie, w którym udział skrzyń manualnych osiąga 92%, co jest znacząco powyżej średniej krajowej wynoszącej 81%. Różnica ponad 10 punktów procentowych stanowi wyraźną przepaść w porównaniu z innymi regionami.
+
+
+# Lubeslkie vs Reszta Polski
+
+## Średnia cena: Lubelskie vs reszta Polski
+
+```{r echo=FALSE, warning=FALSE}
+
+lubelskie_vs_reszta_price <- avg_price_Voivodeship %>%
+  summarise(
+    Region = c("Lubelskie", "Reszta"),
+    avg_price = c(
+      avg_price[Voivodeship == "Lubelskie"],
+      mean(avg_price[Voivodeship != "Lubelskie"])
+    )
+  )
+# bar chart
+ggplot(lubelskie_vs_reszta_price, aes(x = Region, y = avg_price, fill = Region)) +
+  geom_col() +
+  geom_text(aes(label = round(avg_price, 0)), vjust = -0.5) +
+  labs(x = NULL, y = "Średnia cena", title = "Średnia cena Opli") +
+  scale_fill_manual(values = c("Lubelskie" = "#1a80bb", "Reszta" = "orange")) +
+  theme_minimal()
+
+```
+
+Wykres przedstawia średnią cenę samochodów marki Opel w województwie lubelskim w porównaniu z pozostałymi województwami w Polsce. Średnia cena w województwie lubelskim jest niższa o 4 598 zł, co stanowi 13,1% mniej niż średnia obliczona dla pozostałych województw.
+
+## Mediana cen: Lubelskie vs reszta Polski
+
+```{r echo=FALSE, warning=FALSE}
+
+DataFrame_OtoMoto <- DataFrame_OtoMoto %>%
+  mutate(Region = ifelse(Voivodeship == "Lubelskie", "Lubelskie", "Reszta"))
+
+ggplot(DataFrame_OtoMoto, aes(x = Region, y = Price, fill = Region)) +
+  geom_boxplot(alpha = 0.8, outlier.color = "black", outlier.alpha = 0.4) +
+  scale_fill_manual(values = c("Lubelskie" = "#1a80bb", "Reszta" = "orange")) + #FFD580
+  labs(x = NULL, y = "Cena", title = "Mediana cen") +
+  theme_minimal()
+
+```
+
+Wykres pudełkowy zestawia rozkład cen w województwie lubelskim z resztą kraju. Wyższa pozycja mediany dla „Reszty Polski” wskazuje na wyższy poziom przeciętnych cen poza Lubelszczyzną. Większy rozstęp międzykwartylowy (wysokość pudełka) dla danych ogólnopolskich świadczy o większej heterogeniczności cen w typowym segmencie rynku.
+
+Kluczową różnicę stanowi rozkład wartości odstających. W skali kraju obserwuje się liczne transakcje powyżej 200 000 PLN, co sugeruje szeroką dostępność segmentu premium. Rynek lubelski cechuje się mniejszą liczbą takich ofert i niższą ceną maksymalną. Wnioskując: rynek lubelski jest bardziej jednorodny i skupiony na niższych pułapach cenowych, podczas gdy rynek ogólnopolski wykazuje znacznie szerszy rozkład i większy udział dóbr luksusowych.
+
+
+## Rozkład cen: Lubelskie vs reszta Polski
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(DataFrame_OtoMoto, aes(x = Price, fill = Region)) +
+  geom_density(alpha = 0.6) +
+  scale_fill_manual(values = c("Lubelskie" = "#1a80bb", "Reszta" = "orange"), name = "Region") +
+  labs(x = "Cena", y = "Gęstość", title = "Rozkład cen") +
+  theme_minimal()
+
+
+```
+
+Prezentowany wykres gęstości dostarcza wizualnej reprezentacji rozkładu cen, umożliwiając porównanie struktury cen w województwie lubelskim względem pozostałej części kraju.
+W odniesieniu do województwa lubelskiego, krzywa gęstości wykazuje wyższą amplitudę i jest przesunięta w kierunku niższych wartości ceny (w okolicach 20 000 – 30 000 zł).  Oznacza to, że ceny o niższej wartości są statystycznie częściej obserwowane w województwie lubelskim.
+
+W przypadku rozkładu cen dla reszty Polski, obserwuje się, iż w przedziale cen przekraczającym próg około 40 000 – 50 000 zł, krzywa gęstości systematycznie przyjmuje wartości wyższe niż krzywa dla Lubelskiego. Sugeruje to wyższe prawdopodobieństwo wystąpienia transakcji o wyższej wartości w pozostałej części kraju. Dodatkowo, rozkład cen dla Reszty Polski jest charakteryzowany przez większe rozproszenie (niższy i szerszy szczyt modalny), co wskazuje na większą wariancję i szerszy zakres typowych cen.
+
+Oba rozkłady cechuje wyraźna asymetria prawostronna. Ten kształt rozkładu jest typowy dla danych ekonomicznych, gdzie większość obserwacji grupuje się przy niższych wartościach, natomiast nieliczne, ekstremalnie wysokie wartości tworzą długi ogon rozciągający się w prawo. 
+
+Podsumowując, chociaż struktura jakościowa obu rozkładów jest zbliżona, województwo lubelskie odznacza się wyższą koncentracją przy najniższych cenach, natomiast Reszta Polski wykazuje większą heterogeniczność i częstsze występowanie wyższych kwot transakcyjnych.
+
+
+## Liczba ofert: Lubelskie vs reszta Polski
+ 
+```{r echo=FALSE, warning=FALSE}
+
+sales_ads_voivodeship <- DataFrame_OtoMoto%>%
+  group_by(Voivodeship)%>%
+  summarise(sales_ads = n())
+
+# Łączenie danych mapy z liczbą ogłoszeń
+poland_map_sales_ads <- poland_map %>%
+  left_join(sales_ads_voivodeship, by = c("NAME_1" = "Voivodeship"))
+
+# Dodanie etykiet
+points_sales_ads <- poland_map_sales_ads %>%
+  mutate(label = paste0(NAME_1, "\n", sales_ads))
+
+ggplot(poland_map_sales_ads) +
+  geom_sf(aes(fill = sales_ads), color = "black") +
+  scale_fill_gradient(low="#B5C7EB", high = "#0C2B4E")+
+  geom_sf_text(data = points_sales_ads, aes(label = label), size = 3, color = "white") +
+  ggtitle("Ilość ogłoszeń") +
+  labs(fill = "Liczba ogłoszeń")+
+  theme_minimal()+
+  theme(
+    axis.title = element_blank(), # Usuwa tytuły osi (x, y)
+    axis.text = element_blank(),  # Usuwa wartości liczbowe (szerokość/długość)
+    axis.ticks = element_blank(), # Usuwa "kreseczki" na osiach
+    panel.grid = element_blank()  # Usuwa siatkę w tle (opcjonalnie)
+  )
+  
+
+```
+
+Analiza mapy pokazuje, że województwo lubelskie należy do regionów z najniższą liczbą ogłoszeń. W porównaniu do województwa mazowieckiego, które notuje najwięcej ofert, Lubelskie wypada znacznie słabiej – różnica przekracza 2 tysiące ogłoszeń, co stanowi ponad 80% mniej.
+
+W skali kraju wyróżniają się trzy województwa z największą liczbą ogłoszeń: mazowieckie, wielkopolskie i śląskie, natomiast osiem województw, w tym Lubelskie, mieści się w przedziale 200–700 ogłoszeń, co stanowi najniższy poziom w zestawieniu krajowym.
+
+## Cena vs przebieg: Lubelskie vs reszta Polski
+
+```{r echo=FALSE, warning=FALSE}
+
+# Scatter plot: Cena vs Przebieg (Mileage)
+ggplot(DataFrame_OtoMoto, aes(x = Mileage, y = Price, color = Region)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(data = subset(DataFrame_OtoMoto, Region == "Lubelskie"), method = "lm", se = FALSE, color = "#1a80bb") +
+  geom_smooth(data = subset(DataFrame_OtoMoto, Region == "Reszta"), method = "lm", se = FALSE, color = "orange") +
+  scale_x_continuous(labels = scales::comma) +
+  scale_y_continuous(labels = scales::comma) +
+  scale_color_manual(values = c("Lubelskie" = "#1a80bb", "Reszta" = "#FFD580")) +
+  labs(x = "Przebieg", y = "Cena", title = "Cena vs przebieg") +
+  theme_minimal()
+
+```
+
+Na wykresie przedstawiającym zależność ceny od przebiegu samochodów w województwie lubelskim oraz w pozostałych częściach Polski można zauważyć wyraźną różnicę w wycenie pojazdów. Linia trendu dla województwa lubelskiego znajduje się znacząco niżej w przypadku samochodów z niskim przebiegiem, co oznacza, że w tym regionie nowsze auta są średnio wyceniane niżej niż w pozostałych województwach.
+
+Jednocześnie trend ten odwraca się przy wyższych przebiegach – auta z większym przebiegiem są w Lubelskiem wyceniane nieco wyżej niż w reszcie kraju.
+
+Wniosek praktyczny jest taki, że poszukując samochodu z niskim przebiegiem, korzystniej jest kierować się ofertami spoza województwa lubelskiego, natomiast przy samochodach starszych, z wyższym przebiegiem, ceny w Lubelskiem mogą być stosunkowo wyższe.
+
+
+## Cena vs rok produkcji: Lubelskie vs reszta Polski
+
+```{r echo=FALSE, warning=FALSE}
+
+ggplot(DataFrame_OtoMoto, aes(x = Year, y = Price, color = Region)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(data = subset(DataFrame_OtoMoto, Region == "Lubelskie"),  method = "loess", se = FALSE, color = "#1a80bb") +
+  geom_smooth(data = subset(DataFrame_OtoMoto, Region == "Reszta"), method = "loess", se = FALSE, color = "orange") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_color_manual(values = c("Lubelskie" = "#1a80bb", "Reszta" = "#FFD580")) +
+  labs(x = "Rok produkcji", y = "Cena", title = "Cena vs rok produkcji") +
+  theme_minimal()
+
+
+```
+
+
+Na wykresie przedstawiono zależność ceny samochodu od roku produkcji w województwie lubelskim w porównaniu do reszty kraju. Widać wyraźny wzrost cen w miarę nowszych roczników, zarówno w Lubelskiem, jak i w pozostałych regionach.
+
+Linia trendu dla województwa lubelskiego przebiega nieco poniżej trendu dla reszty kraju w przypadku starszych samochodów, co sugeruje, że starsze auta w Lubelskiem są średnio wyceniane niżej niż w innych województwach. Jednak wraz z rokiem produkcji linie trendu zbliżają się do siebie, a dla najnowszych roczników ceny w Lubelskiem są porównywalne lub minimalnie wyższe niż w reszcie kraju.
+
+Praktycznie oznacza to, że osoby szukające starszego samochodu mogą znaleźć korzystniejsze oferty w Lubelskiem, natomiast przy zakupie nowszych aut różnice cenowe między regionami są minimalne i mniej istotne.
+
+# Dlaczego warto kupić Opla w województwie Lubelskim?
+
+## Powód 1
+
+W województwie lubelskim ceny Opli są wyjątkowo korzystne w porównaniu z innymi regionami Polski. To sprawia, że zakup używanego Opla jest nie tylko tańszy, ale także bardziej opłacalny, ponieważ w tej części kraju łatwiej znaleźć samochody w dobrym stanie technicznym i atrakcyjnej cenie. Dla osób poszukujących solidnego auta w rozsądnym budżecie Lubelskie jawi się więc jako jeden z najlepszych wyborów.
+
+## Powód 2
+
+W województwie lubelskim występuje stosunkowo wysoka gęstość ofert Opli w przedziale cenowym 20–60 tys. zł. Oznacza to, że łatwiej znaleźć samochód w atrakcyjnej cenie, przy czym samochody o niższym przebiegu są tutaj dostępne w cenach niższych niż w innych regionach Polski. Dzięki temu Lubelskie jest regionem, w którym rynek używanych Opli oferuje nie tylko szeroki wybór, ale również lepszy stosunek ceny do stanu technicznego pojazdu.
+
