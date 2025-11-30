@@ -29,10 +29,10 @@ Analiza odpowiada na pytanie: *Czy opłaca się kupić Opla w wojewódzwie lubel
 * `Mini_Projekt.Rmd`: Pełny kod źródłowy analizy i raportu.
 * `DataFrame_OtoMoto.csv`: Zbiór danych użyty do analizy.
 * `Mini_Projekt.html`: Wygenerowany i gotowy do podglądu raport końcowy.
+* `OTOMOTO_SCRAP.R`: Skrypt do ściągniacia danych z strony OtoMoto
 
 ## Jak Odtworzyć Projekt
 
 1.  Sklonuj repozytorium: `git clone [adres Twojego repo]`
 2.  Otwórz plik `Mini_Projekt.Rmd` w środowisku RStudio.
 3.  Zainstaluj brakujące pakiety R (jeśli to konieczne, użyj komendy `install.packages()`).
-4.  Użyj funkcji `Knit` w RStudio, aby wygenerować raport HTML.
