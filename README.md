@@ -1,12 +1,11 @@
-# analiza_danych_z_OtoMoto_Opel
-W ramach 2 tygodniowego mini projektu na studiach miałem za zadanie przeanalizować dane zebrane z serwisu OtoMoto dotyczące samochodów marki Opel. Głównym celem analizy było sprawdzenie jak wypada województwo lubelskie na tle krajowym.
-
 # Analiza Rynku Wtórnego Samochodów Marki Opel w Polsce (R)
 
-## Wstęp i Cel Projektu
-Analiza została przeprowadzona w ramach **2-tygodniowego mini-projektu** na studiach. Celem było zbadanie, jak regionalne różnice geograficzne (na przykładzie **województwa lubelskiego**) wpływają na cenę, rocznik i przebieg używanych samochodów marki Opel.
+W ramach 2 tygodniowego mini projektu na studiach miałem za zadanie przeanalizować dane zebrane z serwisu OtoMoto dotyczące samochodów marki Opel. Głównym celem analizy było sprawdzenie jak wypada województwo lubelskie na tle krajowym.
 
-Analiza odpowiada na pytanie: *Czy opłaca się kupić Opla na Wschodzie Polski?*
+## Wstęp i Cel Projektu
+W ramach 2 tygodniowego mini projektu na studiach miałem za zadanie przeanalizować dane zebrane z serwisu OtoMoto dotyczące samochodów marki Opel. Głównym celem analizy było sprawdzenie jak wypada województwo lubelskie na tle krajowym.
+
+Analiza odpowiada na pytanie: *Czy opłaca się kupić Opla w wojewódzwie lubelskim*
 
 ---
 
