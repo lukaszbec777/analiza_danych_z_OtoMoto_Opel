@@ -11,9 +11,8 @@ Analiza odpowiada na pytanie: *Czy opłaca się kupić Opla w wojewódzwie lubel
 
 ## Kluczowe Odkrycia (The Punchline)
 
-* **Różnica Cenowa:** Stwierdzono, że średnia cena Opli w woj. lubelskim jest niższa o [Wstaw wartość, np. 8-15%] w porównaniu do średniej krajowej.
+* **Różnica Cenowa:** Stwierdzono, że średnia cena Opli w woj. lubelskim jest jedną z najniższych w kraju
 * **Wpływ Skrzyni Biegów:** Przeanalizowano popularność skrzyń automatycznych vs. manualnych w regionach Polski.
-* **Wnioski dla Kupujących:** Stworzono rekomendacje, w których rocznikach i klasach przebiegu różnica cen jest najbardziej zauważalna.
 
 ## Stos Technologiczny (Tech Stack)
 
