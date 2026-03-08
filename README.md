@@ -1,7 +1,5 @@
 # Analiza rynku wtórnego samochodów marki Opel w Polsce
 
-W ramach 2 tygodniowego mini projektu na studiach miałem za zadanie przeanalizować dane zebrane z serwisu OtoMoto dotyczące samochodów marki Opel. Głównym celem analizy było sprawdzenie jak wypada województwo lubelskie na tle krajowym.
-
 ## Wstęp i Cel Projektu
 W ramach 2 tygodniowego mini projektu na studiach miałem za zadanie przeanalizować dane zebrane z serwisu OtoMoto dotyczące samochodów marki Opel. Głównym celem analizy było sprawdzenie jak wypada województwo lubelskie na tle krajowym.
 
