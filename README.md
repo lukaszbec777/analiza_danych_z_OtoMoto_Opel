@@ -7,7 +7,7 @@ W ramach 2 tygodniowego mini projektu na studiach miałem za zadanie przeanalizo
 
 Analiza odpowiada na pytanie: *Czy opłaca się kupić Opla w wojewódzwie lubelskim*
 
----
+
 
 ## Kluczowe Odkrycia
 
